@@ -1,9 +1,14 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Headers as Header, Post, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { StripeService } from './stripe.service';
+import { StripeWebhookService } from './stripe-webhook.service';
 
 @Controller('stripe')
 export class StripeController {
-  constructor(private readonly stripeService: StripeService) {}
+  constructor(
+    private readonly stripeService: StripeService,
+    private readonly stripeWebhookService: StripeWebhookService,
+  ) {}
 
   @Post('checkout')
   async checkout(@Body() body: { email: string }) {
@@ -14,5 +19,13 @@ export class StripeController {
     return {
       checkoutUrl: session.url,
     };
+  }
+
+  @Post('webhook')
+  async webhook(
+    @Req() request: Request & { body: Buffer },
+    @Header('stripe-signature') signature: string,
+  ) {
+    return this.stripeWebhookService.handleWebhook(request.body, signature);
   }
 }

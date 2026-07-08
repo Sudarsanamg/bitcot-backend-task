@@ -4,8 +4,72 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+model User {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  stripeCustomerId String?      @unique
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  subscription    Subscription?
+  orders          Order[]
+}
+
+model Subscription {
+  id                    String         @id @default(cuid())
+  userId                String         @unique
+  stripeSubscriptionId  String         @unique
+  stripeCustomerId      String
+  status                String
+  plan                  String
+  billingInterval       BillingInterval
+  priceId               String
+  productId             String
+  startDate             DateTime
+  expiryDate            DateTime
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  latestCheckoutSessionId String       @unique
+  latestPaymentStatus   String
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id                  String   @id @default(cuid())
+  userId              String
+  checkoutSessionId   String   @unique
+  paymentIntentId     String?
+  stripeCustomerId    String
+  stripeSubscriptionId String?
+  amount              Int
+  currency            String
+  paymentStatus       String
+  paymentMethodType   String?
+  createdAt           DateTime @default(now())
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id                  String   @id @default(cuid())
+  eventId             String   @unique
+  eventType           String
+  checkoutSessionId   String?  @unique
+  stripeCustomerId    String?
+  stripeSubscriptionId String?
+  payload             Json
+  processedAt         DateTime @default(now())
 }
 
 datasource db {
