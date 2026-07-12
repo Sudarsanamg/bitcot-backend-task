@@ -44,6 +44,22 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Environment variables
+
+Create a local `.env` file based on `.env.example` and provide these values:
+
+- `DATABASE_URL`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_ID`
+- `MAIL_HOST`
+- `MAIL_PORT`
+- `MAIL_USER`
+- `MAIL_PASSWORD`
+- `MAIL_FROM`
+
+The `MAIL_*` values are used for Mailtrap SMTP delivery of the subscription invoice email.
+
 ## Run tests
 
 ```bash

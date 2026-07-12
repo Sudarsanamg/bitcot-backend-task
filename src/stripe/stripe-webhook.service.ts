@@ -7,12 +7,28 @@ import {
   SubscriptionStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
+import {
+  GeneratedInvoice,
+  InvoiceService,
+} from '../invoice/invoice.service';
 import { StripeService } from './stripe.service';
 
 type StoredSubscription = {
-  status: SubscriptionStatus;
   startDate: Date;
   expiryDate: Date;
+};
+
+type PostPaymentContext = {
+  customerName: string;
+  customerEmail: string;
+  subscriptionPlan: string;
+  billingInterval: string;
+  paymentStatus: string;
+  paymentProvider: string;
+  subscriptionStartDate: Date;
+  subscriptionExpiryDate: Date;
+  paymentDate: Date;
 };
 
 type CheckoutSessionCompleted = Stripe.Checkout.Session & {
@@ -30,6 +46,8 @@ export class StripeWebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
+    private readonly invoiceService: InvoiceService,
+    private readonly emailService: EmailService,
   ) {}
 
   async handleWebhook(payload: Buffer, signature: string) {
@@ -70,93 +88,115 @@ export class StripeWebhookService {
     );
     const paymentDate = new Date();
 
-    await this.prisma.$transaction(async (tx) => {
-      // The webhook event is written first so the same Stripe event id cannot be applied twice.
-      await tx.webhookEvent.create({
-        data: {
-          paymentProvider: PaymentProvider.STRIPE,
-          eventId: event.id,
-          eventType: event.type,
-          providerCheckoutSessionId: extracted.checkoutSessionId,
-          providerCustomerId: extracted.customerId,
-          providerSubscriptionId: extracted.subscriptionId,
-          payload: event as unknown as Prisma.InputJsonValue,
+    let postPaymentContext: PostPaymentContext | null = null;
+
+    try {
+      postPaymentContext = await this.prisma.$transaction(
+        async (tx): Promise<PostPaymentContext | null> => {
+          // The webhook event is written first so the same Stripe event id cannot be applied twice.
+          await tx.webhookEvent.create({
+            data: {
+              paymentProvider: PaymentProvider.STRIPE,
+              eventId: event.id,
+              eventType: event.type,
+              providerCheckoutSessionId: extracted.checkoutSessionId,
+              providerCustomerId: extracted.customerId,
+              providerSubscriptionId: extracted.subscriptionId,
+              payload: event as unknown as Prisma.InputJsonValue,
+            },
+          });
+
+          const alreadyProcessed = await tx.order.findFirst({
+            where: {
+              OR: [
+                { providerCheckoutSessionId: extracted.checkoutSessionId },
+                ...(extracted.paymentIntentId
+                  ? [{ providerPaymentIntentId: extracted.paymentIntentId }]
+                  : []),
+              ],
+            },
+          });
+
+          if (alreadyProcessed) {
+            this.logger.warn(
+              `Duplicate payment ignored for session ${extracted.checkoutSessionId}`,
+            );
+            return null;
+          }
+
+          // Email is the user natural key, so upsert prevents duplicate users.
+          const user = await tx.user.upsert({
+            where: { email: extracted.customerEmail },
+            update: {},
+            create: {
+              email: extracted.customerEmail,
+            },
+          });
+
+          const existingSubscription = (await tx.subscription.findUnique({
+            where: { userId: user.id },
+          })) as StoredSubscription | null;
+
+          const subscriptionSnapshot = this.buildSubscriptionSnapshot(
+            extracted,
+            subscription,
+            existingSubscription,
+            paymentDate,
+          );
+
+          await tx.subscription.upsert({
+            where: { userId: user.id },
+            update: subscriptionSnapshot,
+            create: {
+              userId: user.id,
+              ...subscriptionSnapshot,
+            },
+          });
+
+          await tx.order.create({
+            data: {
+              paymentProvider: PaymentProvider.STRIPE,
+              providerCheckoutSessionId: extracted.checkoutSessionId,
+              providerPaymentIntentId: extracted.paymentIntentId,
+              providerCustomerId: extracted.customerId,
+              providerSubscriptionId: extracted.subscriptionId,
+              amount: extracted.amountPaid,
+              currency: extracted.currency,
+              paymentStatus: extracted.paymentStatus,
+              paymentMethodType: extracted.paymentMethodType,
+              userId: user.id,
+            },
+          });
+
+          return {
+            customerName: this.deriveCustomerName(extracted.customerEmail),
+            customerEmail: extracted.customerEmail,
+            subscriptionPlan: subscriptionSnapshot.plan,
+            billingInterval: subscriptionSnapshot.billingInterval,
+            paymentStatus: subscriptionSnapshot.latestPaymentStatus,
+            paymentProvider: subscriptionSnapshot.paymentProvider,
+            subscriptionStartDate: subscriptionSnapshot.startDate,
+            subscriptionExpiryDate: subscriptionSnapshot.expiryDate,
+            paymentDate,
+          };
         },
-      });
-
-      const alreadyProcessed = await tx.order.findFirst({
-        where: {
-          OR: [
-            { providerCheckoutSessionId: extracted.checkoutSessionId },
-            ...(extracted.paymentIntentId
-              ? [{ providerPaymentIntentId: extracted.paymentIntentId }]
-              : []),
-          ],
-        },
-      });
-
-      if (alreadyProcessed) {
-        this.logger.warn(
-          `Duplicate payment ignored for session ${extracted.checkoutSessionId}`,
-        );
-        return;
-      }
-
-      // Email is the user natural key, so upsert prevents duplicate users.
-      const user = await tx.user.upsert({
-        where: { email: extracted.customerEmail },
-        update: {},
-        create: {
-          email: extracted.customerEmail,
-        },
-      });
-
-      const existingSubscription = (await tx.subscription.findUnique({
-        where: { userId: user.id },
-      })) as StoredSubscription | null;
-
-      const subscriptionSnapshot = this.buildSubscriptionSnapshot(
-        extracted,
-        subscription,
-        existingSubscription,
-        paymentDate,
       );
-
-      await tx.subscription.upsert({
-        where: { userId: user.id },
-        update: subscriptionSnapshot,
-        create: {
-          userId: user.id,
-          ...subscriptionSnapshot,
-        },
-      });
-
-      await tx.order.create({
-        data: {
-          paymentProvider: PaymentProvider.STRIPE,
-          providerCheckoutSessionId: extracted.checkoutSessionId,
-          providerPaymentIntentId: extracted.paymentIntentId,
-          providerCustomerId: extracted.customerId,
-          providerSubscriptionId: extracted.subscriptionId,
-          amount: extracted.amountPaid,
-          currency: extracted.currency,
-          paymentStatus: extracted.paymentStatus,
-          paymentMethodType: extracted.paymentMethodType,
-          userId: user.id,
-        },
-      });
-    }).catch((error: unknown) => {
+    } catch (error: unknown) {
       if (this.isDuplicateWebhookError(error)) {
         this.logger.warn(`Duplicate webhook ignored: ${event.id}`);
-        return;
+        return { received: true };
       }
 
       throw error;
-    });
+    }
 
     this.logger.log(
       `Processed checkout.session.completed for session ${extracted.checkoutSessionId}`,
     );
+
+    if (postPaymentContext) {
+      await this.generateInvoiceAndSendEmail(postPaymentContext);
+    }
 
     return { received: true };
   }
@@ -290,6 +330,63 @@ export class StripeWebhookService {
 
   private normalizeStripeId(value: string | Stripe.Customer | Stripe.Subscription | Stripe.PaymentIntent | null) {
     return typeof value === 'string' ? value : value?.id ?? null;
+  }
+
+  private async generateInvoiceAndSendEmail(context: PostPaymentContext) {
+    let generatedInvoice: GeneratedInvoice;
+
+    try {
+      generatedInvoice = await this.invoiceService.generateInvoice({
+        customerName: context.customerName,
+        customerEmail: context.customerEmail,
+        invoiceDate: context.paymentDate,
+        paymentDate: context.paymentDate,
+        paymentProvider: context.paymentProvider,
+        paymentStatus: context.paymentStatus,
+        subscriptionPlan: context.subscriptionPlan,
+        billingInterval: context.billingInterval,
+        subscriptionStartDate: context.subscriptionStartDate,
+        subscriptionExpiryDate: context.subscriptionExpiryDate,
+        generatedDate: context.paymentDate,
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Invoice generation failed for ${context.customerEmail}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+
+    try {
+      await this.emailService.sendSubscriptionConfirmationEmail({
+        customerName: context.customerName,
+        customerEmail: context.customerEmail,
+        invoiceNumber: generatedInvoice.invoiceNumber,
+        invoiceFilePath: generatedInvoice.filePath,
+        subscriptionPlan: context.subscriptionPlan,
+        billingInterval: context.billingInterval,
+        paymentStatus: context.paymentStatus,
+        paymentProvider: context.paymentProvider,
+        subscriptionStartDate: context.subscriptionStartDate,
+        subscriptionExpiryDate: context.subscriptionExpiryDate,
+        paymentDate: context.paymentDate,
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Email sending failed for ${context.customerEmail}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  private deriveCustomerName(email: string) {
+    const localPart = email.split('@')[0] ?? email;
+
+    return localPart
+      .split(/[._-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
   }
 
   private isDuplicateWebhookError(error: unknown) {
