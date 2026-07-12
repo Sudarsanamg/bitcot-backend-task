@@ -69,4 +69,20 @@ export class SubscriptionService {
   private formatBillingInterval(interval: BillingInterval) {
     return interval.toLowerCase();
   }
+
+  async markExpiredSubscriptionsAsInactive(): Promise<number> {
+    const result = await this.prisma.subscription.updateMany({
+      where: {
+        status: SubscriptionStatus.ACTIVE,
+        expiryDate: {
+          lt: new Date(),
+        },
+      },
+      data: {
+        status: SubscriptionStatus.INACTIVE,
+      },
+    });
+
+    return result.count;
+  }
 }

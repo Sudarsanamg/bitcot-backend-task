@@ -12,7 +12,23 @@ export class ReminderCronService {
     private readonly reminderQueueService: ReminderQueueService,
   ) {}
 
-@Cron('*/5 * * * *')
+  @Cron('*/5 * * * *')
+  async deactivateExpiredSubscriptions() {
+    this.logger.log('Expired subscription deactivation cron started');
+    try {
+      const count = await this.subscriptionService.markExpiredSubscriptionsAsInactive();
+      if (count > 0) {
+        this.logger.log(`Deactivated ${count} expired subscription(s)`);
+      }
+    } catch (error: unknown) {
+      this.logger.error(
+        'Failed to deactivate expired subscriptions',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
+  @Cron('*/5 * * * *')
   async enqueueRenewalReminders() {
     this.logger.log('Subscription renewal reminder cron started');
 

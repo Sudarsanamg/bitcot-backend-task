@@ -18,13 +18,7 @@ enum PaymentProvider {
 
 enum SubscriptionStatus {
   ACTIVE
-  TRIALING
-  INCOMPLETE
-  INCOMPLETE_EXPIRED
-  PAST_DUE
-  CANCELED
-  UNPAID
-  PAUSED
+  INACTIVE
 }
 
 model User {
