@@ -145,6 +145,12 @@ Open:
 ```
 http://localhost:3000/stripe/checkout
 ```
+Body
+```
+{
+  email:'test.email.com`
+}
+```
 
 This endpoint creates a Stripe Checkout Session.
 
