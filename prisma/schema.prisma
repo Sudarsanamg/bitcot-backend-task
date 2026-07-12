@@ -16,6 +16,17 @@ enum PaymentProvider {
   STRIPE
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  PAST_DUE
+  CANCELED
+  UNPAID
+  PAUSED
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -32,7 +43,7 @@ model Subscription {
   paymentProvider         PaymentProvider
   providerSubscriptionId  String          @unique
   providerCustomerId      String
-  status                  String
+  status                  SubscriptionStatus
   plan                    String
   billingInterval         BillingInterval
   providerPriceId         String

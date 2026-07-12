@@ -22,3 +22,14 @@ export const BillingInterval = {
 export const PaymentProvider = {
   STRIPE: 'STRIPE',
 } as const;
+
+export const SubscriptionStatus = {
+  ACTIVE: 'ACTIVE',
+  TRIALING: 'TRIALING',
+  INCOMPLETE: 'INCOMPLETE',
+  INCOMPLETE_EXPIRED: 'INCOMPLETE_EXPIRED',
+  PAST_DUE: 'PAST_DUE',
+  CANCELED: 'CANCELED',
+  UNPAID: 'UNPAID',
+  PAUSED: 'PAUSED',
+} as const;

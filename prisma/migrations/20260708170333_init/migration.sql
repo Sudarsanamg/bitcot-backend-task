@@ -4,6 +4,9 @@ CREATE TYPE "BillingInterval" AS ENUM ('MONTHLY', 'YEARLY');
 -- CreateEnum
 CREATE TYPE "PaymentProvider" AS ENUM ('STRIPE');
 
+-- CreateEnum
+CREATE TYPE "SubscriptionStatus" AS ENUM ('ACTIVE', 'TRIALING', 'INCOMPLETE', 'INCOMPLETE_EXPIRED', 'PAST_DUE', 'CANCELED', 'UNPAID', 'PAUSED');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -21,7 +24,7 @@ CREATE TABLE "Subscription" (
     "paymentProvider" "PaymentProvider" NOT NULL,
     "providerSubscriptionId" TEXT NOT NULL,
     "providerCustomerId" TEXT NOT NULL,
-    "status" TEXT NOT NULL,
+    "status" "SubscriptionStatus" NOT NULL,
     "plan" TEXT NOT NULL,
     "billingInterval" "BillingInterval" NOT NULL,
     "providerPriceId" TEXT NOT NULL,

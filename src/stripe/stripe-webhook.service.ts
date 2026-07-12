@@ -1,11 +1,16 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
-import { BillingInterval, PaymentProvider, Prisma } from '@prisma/client';
+import {
+  BillingInterval,
+  PaymentProvider,
+  Prisma,
+  SubscriptionStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from './stripe.service';
 
 type StoredSubscription = {
-  status: string;
+  status: SubscriptionStatus;
   startDate: Date;
   expiryDate: Date;
 };
@@ -116,7 +121,6 @@ export class StripeWebhookService {
         existingSubscription,
         paymentDate,
       );
-      console.log('subscriptionSnapshot', subscriptionSnapshot);
 
       await tx.subscription.upsert({
         where: { userId: user.id },
@@ -230,7 +234,7 @@ export class StripeWebhookService {
       paymentProvider: PaymentProvider.STRIPE,
       providerSubscriptionId: extracted.subscriptionId,
       providerCustomerId: extracted.customerId,
-      status: subscription.status.toUpperCase(),
+      status: this.mapSubscriptionStatus(subscription.status),
       plan: typeof price.product === 'string' ? price.product : price.product.name ?? price.id,
       billingInterval,
       providerPriceId: price.id,
@@ -272,6 +276,16 @@ export class StripeWebhookService {
     throw new BadRequestException(
       `Unsupported billing interval: ${interval ?? 'unknown'}`,
     );
+  }
+
+  private mapSubscriptionStatus(status: string): SubscriptionStatus {
+    const normalizedStatus = status.toUpperCase().replace(/-/g, '_');
+
+    if (normalizedStatus in SubscriptionStatus) {
+      return normalizedStatus as SubscriptionStatus;
+    }
+
+    throw new BadRequestException(`Unsupported subscription status: ${status}`);
   }
 
   private normalizeStripeId(value: string | Stripe.Customer | Stripe.Subscription | Stripe.PaymentIntent | null) {
