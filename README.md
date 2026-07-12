@@ -1,139 +1,309 @@
 # Bitcot Backend Task
 
-This project is a robust backend application built with **NestJS**, **Prisma** (PostgreSQL), **Redis**, and **BullMQ** for background job processing. It also includes a custom **Model Context Protocol (MCP)** server to expose internal analytics (revenue, active subscribers) securely to AI agents.
+This project is a backend application built with **NestJS**, **Prisma**, **PostgreSQL**, **Redis**, **BullMQ**, and **Stripe**. It also includes a custom **Model Context Protocol (MCP)** server that exposes platform analytics (revenue, active subscribers, etc.) to AI clients.
 
 ---
 
-## 🛠️ Application Setup
+# 🛠️ Application Setup
 
-1. **Install Dependencies**
-   Install the required Node.js packages for both the main application and the MCP server.
-   ```bash
-   # Install main application dependencies
-   npm install
+## 1. Clone the Repository
 
-   # Install MCP server dependencies
-   cd mcp-server
-   npm install
-   cd ..
-   ```
-
-2. **Environment Variables**
-   Create a `.env` file in the root of the project and provide the necessary credentials. You will need:
-   - Database Connection String (PostgreSQL)
-   - Redis Connection URL
-   - Stripe Secret Keys and Webhook Secrets
-   - SMTP Credentials for Email (Nodemailer)
-
-3. **Infrastructure Setup (Docker)**
-   This project uses `docker-compose` to run PostgreSQL and Redis locally. Start the infrastructure in the background:
-   ```bash
-   docker-compose up -d
-   ```
-   *(Note: The database runs on port 5433 and Redis on 6379 as configured in `docker-compose.yml`)*
-
-4. **Database Migration**
-   Once the database container is running, execute Prisma migrations to set up your schema:
-   ```bash
-   npx prisma generate
-   npx prisma migrate dev
-   # Or push directly to the DB schema
-   npx prisma db push
-   ```
+```bash
+git clone <repository-url>
+cd bitcot-backend-task
+```
 
 ---
 
-## 🚀 Running the Application
+## 2. Install Dependencies
 
-You can run the application in various modes depending on your environment.
+Install dependencies for both the main application and the MCP server.
 
-**Development Mode:**
+```bash
+# Main application
+npm install
+
+# MCP Server
+cd mcp-server
+npm install
+cd ..
+```
+
+---
+
+## 3. Configure Environment Variables
+
+Create a `.env` file in the project root.
+
+Configure the following:
+
+- PostgreSQL Database URL
+- Redis URL
+- Stripe Secret Key
+- Stripe Webhook Secret
+- SMTP Credentials (Mailtrap)
+- Other application secrets
+
+Example:
+
+```env
+DATABASE_URL=
+REDIS_URL=
+
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+
+SMTP_HOST=
+SMTP_PORT=
+SMTP_USER=
+SMTP_PASS=
+```
+
+---
+
+## 4. Start PostgreSQL & Redis
+
+The project includes a `docker-compose.yml`.
+
+Start the required services:
+
+```bash
+docker compose up -d
+```
+
+By default:
+
+- PostgreSQL → **5433**
+- Redis → **6379**
+
+---
+
+## 5. Generate Prisma Client & Database Schema
+
+```bash
+npx prisma generate
+npx prisma migrate dev
+```
+
+or
+
+```bash
+npx prisma db push
+```
+
+---
+
+# 🚀 Running the Application
+
+Development:
+
 ```bash
 npm run start:dev
 ```
 
-**Production Mode:**
+Production:
+
 ```bash
 npm run build
 npm run start:prod
 ```
 
-Once started, the application exposes REST endpoints for webhooks (e.g., Stripe) and internal routing (e.g., `/analytics/revenue`).
+Application will start on:
+
+```
+http://localhost:3000
+```
 
 ---
 
-## ⚙️ Verifying Background Jobs
+# 💳 Stripe Webhook Setup
 
-The application leverages **BullMQ** backed by **Redis** to handle asynchronous tasks such as sending subscription renewal reminder emails.
+Stripe webhooks require port forwarding using the Stripe CLI.
 
-1. **Start the Application**: Ensure the NestJS application is running (`npm run start:dev`).
-2. **Check the Logs**: Upon startup, you will see output confirming that the job processors and cron services have started:
-   ```
-   [ReminderProcessor] Renewal reminders worker started
-   [ReminderCronService] Subscription renewal reminder cron started
-   ```
-3. **Execution**: The Cron service regularly checks for subscriptions expiring within a certain timeframe (e.g., 3 days). If it finds matches, it enqueues a job, and the worker processes it (e.g., sending an email via Nodemailer). 
-   ```
-   [ReminderCronService] Found 1 subscription(s) expiring within the next 3 days
-   [ReminderCronService] Enqueued 1 renewal reminder job(s)
-   [ReminderProcessor] Renewal reminder email sent for subscription <id>
-   ```
+Open another terminal and run:
+
+```bash
+stripe listen --forward-to localhost:3000/stripe/webhook
+```
+
+Copy the generated webhook signing secret and place it in your `.env` file.
+
+Example:
+
+```env
+STRIPE_WEBHOOK_SECRET=whsec_xxxxxxxxx
+```
 
 ---
 
-## 🤖 Using the MCP Server with an AI Client
+# 💰 Testing the Checkout Flow
 
-The project includes a custom **MCP Server** in the `/mcp-server` directory. This server exposes specific backend capabilities (such as fetching active subscribers, revenue, and platform summaries) directly to AI assistants like Antigravity or Claude Desktop.
+Once the application is running:
 
-### 1. Build the MCP Server
-First, ensure the MCP server is built and transpiled to JavaScript.
+Open:
+
+```
+http://localhost:3000/stripe/checkout
+```
+
+This endpoint creates a Stripe Checkout Session.
+
+Then:
+
+1. Complete the payment using Stripe's test card.
+2. Stripe sends a webhook to the application.
+3. The subscription is activated.
+4. An invoice is generated.
+5. A confirmation email with the invoice is sent to the configured **Mailtrap Sandbox** inbox.
+
+Use Stripe's test card:
+
+```
+Card Number: 4242 4242 4242 4242
+Expiry: Any future date
+CVC: Any 3 digits
+ZIP: Any value
+```
+
+---
+
+# ⚙️ Background Jobs (BullMQ)
+
+The application uses **BullMQ** with **Redis** to process asynchronous tasks without blocking API requests.
+
+### Invoice Processing
+
+After a successful Stripe payment:
+
+1. Stripe sends a webhook to the application.
+2. The subscription is created or updated.
+3. An invoice is generated.
+4. A background job is added to the BullMQ queue.
+5. The worker sends the invoice email to the user using **Nodemailer** (Mailtrap in development).
+
+Example logs:
+
+```text
+[StripeWebhook] Payment completed
+[InvoiceQueue] Invoice job added
+[InvoiceProcessor] Invoice generated
+[InvoiceProcessor] Invoice email sent successfully
+```
+
+---
+
+### Subscription Renewal Logic
+
+If a user already has an **active subscription** and purchases another subscription before it expires, the application **extends the existing subscription** instead of creating a new one.
+
+For example:
+
+| Current Expiry | User Purchases Again | New Expiry |
+|---------------|----------------------|------------|
+| Aug 10, 2026 | Jul 25, 2026 | Sep 9, 2026 |
+
+This means the new billing period is **added to the current expiry date** (e.g., another **30 days**), ensuring users never lose their remaining subscription time.
+
+---
+
+### Daily Subscription Expiry Check
+
+A scheduled **Cron Job** runs once every day to identify subscriptions that are nearing their expiration date.
+
+For each matching subscription:
+
+1. The cron service queries the database.
+2. Eligible subscriptions are added to the BullMQ queue.
+3. The worker processes each job.
+4. A subscription renewal reminder email is sent to the user.
+
+Example logs:
+
+```text
+[ReminderCronService] Daily subscription check started
+[ReminderCronService] Found 3 subscriptions nearing expiry
+[ReminderCronService] Enqueued 3 reminder jobs
+[ReminderProcessor] Renewal reminder email sent to user@example.com
+```
+
+This architecture ensures that:
+
+- Invoice emails are processed asynchronously after successful payments.
+- Renewal reminder emails are sent automatically without blocking API requests.
+- Background jobs remain reliable through Redis-backed BullMQ queues.
+- Existing active subscriptions are extended when users purchase another subscription before expiration.
+
+# 🤖 MCP Server Setup
+
+## Build
+
 ```bash
 cd mcp-server
+npm install
 npm run build
 ```
 
-### 2. Configure the AI Client
-To connect the MCP server to your AI client, you must configure the client to run the generated Node.js script.
+---
 
-**For Antigravity:**
-Open or create `~/.gemini/antigravity/mcp_config.json` and add the following configuration, ensuring you use the absolute path to the compiled `index.js` file:
+## Configure AI Client
+
+Example configuration for Antigravity:
 
 ```json
 {
   "mcpServers": {
-    "my-custom-server": {
+    "bitcot-backend": {
       "command": "node",
       "args": [
-        "/absolute/path/to/your/project/bitcot-backend-task/mcp-server/dist/index.js"
+        "/absolute/path/to/bitcot-backend-task/mcp-server/dist/index.js"
       ]
     }
   }
 }
 ```
 
-### 3. Usage
-Restart your AI client or begin a new conversation. The AI will automatically spawn the custom MCP server as a background process via `stdio`. You can now ask the AI questions like:
-- *"What is the total revenue?"*
-- *"How many active subscribers are there?"*
-- *"Give me a platform summary."*
+Restart the AI client after saving the configuration.
 
-The AI will use the MCP server tools to interact with your local environment securely and answer the queries!
+---
 
+## Example Prompts
 
+Once connected, ask:
 
-##Stripe port forward
-stripe listen --forward-to localhost:3000/stripe/webhook
+- What is the total revenue?
+- How many active subscribers are there?
+- Show platform analytics.
+- Give me a platform summary.
 
-docker compose up -d
+The AI retrieves these values through the MCP server.
 
-<!-- 
+---
+
+# 🧪 Testing Subscription Expiry
+
+To test renewal reminders without waiting for the subscription to expire, update the expiry date manually.
+
+```sql
 UPDATE "Subscription"
-SET
-  "expiryDate" = NOW(),
-  "currentPeriodEnd" = NOW(),
-  "updatedAt" = NOW()
+SET "expiryDate" = NOW() + INTERVAL '1 day'
 WHERE "userId" = (
   SELECT "id"
   FROM "User"
-  WHERE "email" = 'test123@example.com'
-); -->
+  WHERE "email" = 'your@email.com'
+);
+
+The cron job will detect the subscription and enqueue the reminder email.
+
+---
+
+# 🛠 Tech Stack
+
+- NestJS
+- Prisma ORM
+- PostgreSQL
+- Redis
+- BullMQ
+- Stripe
+- Nodemailer
+- Mailtrap
+- Model Context Protocol (MCP)
