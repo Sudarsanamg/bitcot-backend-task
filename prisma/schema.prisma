@@ -54,7 +54,7 @@ model Order {
   userId                  String
   paymentProvider         PaymentProvider
   providerCheckoutSessionId String       @unique
-  providerPaymentIntentId String?
+  providerPaymentIntentId  String?         @unique
   providerCustomerId      String
   providerSubscriptionId   String?
   amount                  Int

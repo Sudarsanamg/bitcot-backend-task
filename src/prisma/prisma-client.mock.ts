@@ -18,3 +18,7 @@ export const BillingInterval = {
   MONTHLY: 'MONTHLY',
   YEARLY: 'YEARLY',
 } as const;
+
+export const PaymentProvider = {
+  STRIPE: 'STRIPE',
+} as const;

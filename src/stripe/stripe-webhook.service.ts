@@ -4,6 +4,12 @@ import { BillingInterval, PaymentProvider, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from './stripe.service';
 
+type StoredSubscription = {
+  status: string;
+  startDate: Date;
+  expiryDate: Date;
+};
+
 type CheckoutSessionCompleted = Stripe.Checkout.Session & {
   payment_intent: string | Stripe.PaymentIntent | null;
   customer: string | Stripe.Customer | null;
@@ -35,12 +41,32 @@ export class StripeWebhookService {
 
     const session = event.data.object as CheckoutSessionCompleted;
     const extracted = this.extractCompletedCheckoutSession(session);
+
+    const paymentAlreadyProcessed = await this.prisma.order.findFirst({
+      where: {
+        OR: [
+          { providerCheckoutSessionId: extracted.checkoutSessionId },
+          ...(extracted.paymentIntentId
+            ? [{ providerPaymentIntentId: extracted.paymentIntentId }]
+            : []),
+        ],
+      },
+    });
+
+    if (paymentAlreadyProcessed) {
+      this.logger.warn(
+        `Duplicate payment ignored for session ${extracted.checkoutSessionId}`,
+      );
+      return { received: true };
+    }
+
     const subscription = await this.stripeService.retrieveSubscription(
       extracted.subscriptionId,
     );
+    const paymentDate = new Date();
 
     await this.prisma.$transaction(async (tx) => {
-      // The webhook event is written first so repeated deliveries fail fast on the unique event id.
+      // The webhook event is written first so the same Stripe event id cannot be applied twice.
       await tx.webhookEvent.create({
         data: {
           paymentProvider: PaymentProvider.STRIPE,
@@ -53,6 +79,25 @@ export class StripeWebhookService {
         },
       });
 
+      const alreadyProcessed = await tx.order.findFirst({
+        where: {
+          OR: [
+            { providerCheckoutSessionId: extracted.checkoutSessionId },
+            ...(extracted.paymentIntentId
+              ? [{ providerPaymentIntentId: extracted.paymentIntentId }]
+              : []),
+          ],
+        },
+      });
+
+      if (alreadyProcessed) {
+        this.logger.warn(
+          `Duplicate payment ignored for session ${extracted.checkoutSessionId}`,
+        );
+        return;
+      }
+
+      // Email is the user natural key, so upsert prevents duplicate users.
       const user = await tx.user.upsert({
         where: { email: extracted.customerEmail },
         update: {},
@@ -61,10 +106,17 @@ export class StripeWebhookService {
         },
       });
 
+      const existingSubscription = (await tx.subscription.findUnique({
+        where: { userId: user.id },
+      })) as StoredSubscription | null;
+
       const subscriptionSnapshot = this.buildSubscriptionSnapshot(
         extracted,
         subscription,
+        existingSubscription,
+        paymentDate,
       );
+      console.log('subscriptionSnapshot', subscriptionSnapshot);
 
       await tx.subscription.upsert({
         where: { userId: user.id },
@@ -75,20 +127,8 @@ export class StripeWebhookService {
         },
       });
 
-      await tx.order.upsert({
-        where: { providerCheckoutSessionId: extracted.checkoutSessionId },
-        update: {
-          paymentProvider: PaymentProvider.STRIPE,
-          providerPaymentIntentId: extracted.paymentIntentId,
-          providerCustomerId: extracted.customerId,
-          providerSubscriptionId: extracted.subscriptionId,
-          amount: extracted.amountPaid,
-          currency: extracted.currency,
-          paymentStatus: extracted.paymentStatus,
-          paymentMethodType: extracted.paymentMethodType,
-        },
-        create: {
-          userId: user.id,
+      await tx.order.create({
+        data: {
           paymentProvider: PaymentProvider.STRIPE,
           providerCheckoutSessionId: extracted.checkoutSessionId,
           providerPaymentIntentId: extracted.paymentIntentId,
@@ -98,6 +138,7 @@ export class StripeWebhookService {
           currency: extracted.currency,
           paymentStatus: extracted.paymentStatus,
           paymentMethodType: extracted.paymentMethodType,
+          userId: user.id,
         },
       });
     }).catch((error: unknown) => {
@@ -152,6 +193,8 @@ export class StripeWebhookService {
   private buildSubscriptionSnapshot(
     extracted: ReturnType<StripeWebhookService['extractCompletedCheckoutSession']>,
     subscription: Awaited<ReturnType<StripeService['retrieveSubscription']>>,
+    existingSubscription: StoredSubscription | null,
+    paymentDate: Date,
   ) {
     const subscriptionItem = subscription.items.data[0];
     const price = subscriptionItem?.price;
@@ -163,32 +206,58 @@ export class StripeWebhookService {
     const recurringInterval = price.recurring?.interval;
     const billingInterval = this.mapBillingInterval(recurringInterval);
     const productId = typeof price.product === 'string' ? price.product : price.product.id;
+    // The current expiry date is the renewal source of truth.
+    // If the subscription has not expired yet, extend from that saved expiry
+    // so a second payment never recreates the same 30-day window.
+    const shouldExtendFromExpiry =
+      existingSubscription !== null &&
+      existingSubscription.expiryDate > paymentDate;
+    const renewalAnchorDate = shouldExtendFromExpiry
+      ? existingSubscription.expiryDate
+      : paymentDate;
+    const nextExpiryDate = this.addBillingInterval(
+      renewalAnchorDate,
+      billingInterval,
+    );
+
+    // When a subscription is still active, extend from its current expiry date so the user
+    // never loses prepaid time by renewing early.
+    const startDate = shouldExtendFromExpiry
+      ? existingSubscription.startDate
+      : paymentDate;
 
     return {
       paymentProvider: PaymentProvider.STRIPE,
       providerSubscriptionId: extracted.subscriptionId,
       providerCustomerId: extracted.customerId,
-      status: subscription.status,
+      status: subscription.status.toUpperCase(),
       plan: typeof price.product === 'string' ? price.product : price.product.name ?? price.id,
       billingInterval,
       providerPriceId: price.id,
       providerProductId: productId,
-      startDate: this.toStripeDate(subscription.start_date, 'startDate'),
-      expiryDate: this.toStripeDate(
-        this.getSubscriptionTimestamp(subscription, subscriptionItem, 'current_period_end'),
-        'expiryDate',
-      ),
-      currentPeriodStart: this.toStripeDate(
-        this.getSubscriptionTimestamp(subscription, subscriptionItem, 'current_period_start'),
-        'currentPeriodStart',
-      ),
-      currentPeriodEnd: this.toStripeDate(
-        this.getSubscriptionTimestamp(subscription, subscriptionItem, 'current_period_end'),
-        'currentPeriodEnd',
-      ),
+      startDate,
+      expiryDate: nextExpiryDate,
+      currentPeriodStart: renewalAnchorDate,
+      currentPeriodEnd: nextExpiryDate,
       latestCheckoutSessionId: extracted.checkoutSessionId,
       latestPaymentStatus: extracted.paymentStatus,
     };
+  }
+
+  private addBillingInterval(baseDate: Date, interval: BillingInterval) {
+    const expiration = new Date(baseDate.getTime());
+
+    if (interval === BillingInterval.MONTHLY) {
+      expiration.setDate(expiration.getDate() + 30);
+      return expiration;
+    }
+
+    if (interval === BillingInterval.YEARLY) {
+      expiration.setDate(expiration.getDate() + 365);
+      return expiration;
+    }
+
+    throw new BadRequestException(`Unsupported billing interval: ${interval}`);
   }
 
   private mapBillingInterval(interval?: Stripe.Price.Recurring.Interval) {
@@ -207,47 +276,6 @@ export class StripeWebhookService {
 
   private normalizeStripeId(value: string | Stripe.Customer | Stripe.Subscription | Stripe.PaymentIntent | null) {
     return typeof value === 'string' ? value : value?.id ?? null;
-  }
-
-  private getSubscriptionTimestamp(
-    subscription: Stripe.Subscription,
-    subscriptionItem:
-      | (Stripe.Subscription['items']['data'][number] & {
-          current_period_start?: number;
-          current_period_end?: number;
-        })
-      | undefined,
-    field: 'current_period_start' | 'current_period_end',
-  ) {
-    const itemTimestamp = subscriptionItem?.[field];
-    if (typeof itemTimestamp === 'number') {
-      return itemTimestamp;
-    }
-
-    const topLevelTimestamp = (subscription as Stripe.Subscription & Partial<Record<typeof field, number>>)[field];
-    if (typeof topLevelTimestamp === 'number') {
-      return topLevelTimestamp;
-    }
-
-    throw new BadRequestException(
-      `Stripe subscription is missing ${field.replace('_', ' ')} timestamp`,
-    );
-  }
-
-  private toStripeDate(timestamp: unknown, label: string) {
-    const normalizedTimestamp = Number(timestamp);
-
-    if (!Number.isFinite(normalizedTimestamp) || normalizedTimestamp <= 0) {
-      throw new BadRequestException(`Stripe subscription is missing ${label} timestamp`);
-    }
-
-    const date = new Date(normalizedTimestamp * 1000);
-
-    if (Number.isNaN(date.getTime())) {
-      throw new BadRequestException(`Stripe produced an invalid ${label}`);
-    }
-
-    return date;
   }
 
   private isDuplicateWebhookError(error: unknown) {

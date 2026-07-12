@@ -87,6 +87,9 @@ CREATE UNIQUE INDEX "Subscription_latestCheckoutSessionId_key" ON "Subscription"
 CREATE UNIQUE INDEX "Order_providerCheckoutSessionId_key" ON "Order"("providerCheckoutSessionId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Order_providerPaymentIntentId_key" ON "Order"("providerPaymentIntentId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "WebhookEvent_eventId_key" ON "WebhookEvent"("eventId");
 
 -- CreateIndex
