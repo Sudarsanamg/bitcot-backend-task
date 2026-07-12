@@ -6,6 +6,10 @@ import {
   subscriptionSuccessTemplate,
   type SubscriptionSuccessTemplateData,
 } from './templates/subscription-success.template';
+import {
+  renewalReminderTemplate,
+  type RenewalReminderTemplateData,
+} from './templates/renewal-reminder.template';
 
 export interface SendInvoiceEmailInput {
   customerName: string;
@@ -19,6 +23,14 @@ export interface SendInvoiceEmailInput {
   subscriptionStartDate: Date;
   subscriptionExpiryDate: Date;
   paymentDate: Date;
+}
+
+export interface SendRenewalReminderInput {
+  customerName: string;
+  customerEmail: string;
+  subscriptionPlan: string;
+  billingInterval: string;
+  subscriptionExpiryDate: Date | string;
 }
 
 @Injectable()
@@ -65,6 +77,19 @@ export class EmailService {
     });
   }
 
+  async sendRenewalReminder(input: SendRenewalReminderInput): Promise<void> {
+    const templateData = this.buildRenewalReminderTemplateData(input);
+    const html = renewalReminderTemplate(templateData);
+
+    await this.transporter.sendMail({
+      from: this.mailFrom,
+      to: input.customerEmail,
+      subject: 'Your subscription is expiring soon',
+      text: this.buildRenewalReminderTextBody(input),
+      html,
+    });
+  }
+
   private buildTemplateData(
     input: SendInvoiceEmailInput,
   ): SubscriptionSuccessTemplateData {
@@ -76,6 +101,17 @@ export class EmailService {
       subscriptionExpiryDate: input.subscriptionExpiryDate,
       invoiceNumber: input.invoiceNumber,
       paymentProvider: input.paymentProvider,
+    };
+  }
+
+  private buildRenewalReminderTemplateData(
+    input: SendRenewalReminderInput,
+  ): RenewalReminderTemplateData {
+    return {
+      customerName: input.customerName,
+      subscriptionPlan: input.subscriptionPlan,
+      billingInterval: input.billingInterval,
+      subscriptionExpiryDate: this.normalizeDate(input.subscriptionExpiryDate),
     };
   }
 
@@ -94,12 +130,37 @@ export class EmailService {
     ].join('\n');
   }
 
+  private buildRenewalReminderTextBody(input: SendRenewalReminderInput) {
+    return [
+      `Hello ${input.customerName},`,
+      '',
+      'Your subscription is expiring soon.',
+      `Plan: ${input.subscriptionPlan}`,
+      `Billing interval: ${input.billingInterval}`,
+      `Expiry date: ${this.formatDisplayDate(
+        this.normalizeDate(input.subscriptionExpiryDate),
+      )}`,
+      '',
+      'Please renew your subscription to avoid interruption in service.',
+    ].join('\n');
+  }
+
   private formatDisplayDate(date: Date) {
     return new Intl.DateTimeFormat('en-GB', {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
     }).format(date);
+  }
+
+  private normalizeDate(value: Date | string) {
+    const date = value instanceof Date ? value : new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new Error('Invalid subscription expiry date');
+    }
+
+    return date;
   }
 
   private getRequiredEnv(key: string) {

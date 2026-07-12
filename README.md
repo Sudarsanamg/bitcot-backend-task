@@ -118,3 +118,15 @@ Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
 stripe listen --forward-to localhost:3000/stripe/webhook
 
 docker compose up -d
+
+<!-- 
+UPDATE "Subscription"
+SET
+  "expiryDate" = NOW(),
+  "currentPeriodEnd" = NOW(),
+  "updatedAt" = NOW()
+WHERE "userId" = (
+  SELECT "id"
+  FROM "User"
+  WHERE "email" = 'test123@example.com'
+); -->
