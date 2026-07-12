@@ -1,0 +1,20 @@
+{
+  "name": "bitcot-backend-task-mcp-server",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Standalone MCP server for backend analytics tools",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsc -w -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.16.0",
+    "axios": "^1.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

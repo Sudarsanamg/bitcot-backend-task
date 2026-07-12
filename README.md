@@ -1,98 +1,139 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Bitcot Backend Task
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+This project is a robust backend application built with **NestJS**, **Prisma** (PostgreSQL), **Redis**, and **BullMQ** for background job processing. It also includes a custom **Model Context Protocol (MCP)** server to expose internal analytics (revenue, active subscribers) securely to AI agents.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## 🛠️ Application Setup
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+1. **Install Dependencies**
+   Install the required Node.js packages for both the main application and the MCP server.
+   ```bash
+   # Install main application dependencies
+   npm install
 
-## Project setup
+   # Install MCP server dependencies
+   cd mcp-server
+   npm install
+   cd ..
+   ```
 
+2. **Environment Variables**
+   Create a `.env` file in the root of the project and provide the necessary credentials. You will need:
+   - Database Connection String (PostgreSQL)
+   - Redis Connection URL
+   - Stripe Secret Keys and Webhook Secrets
+   - SMTP Credentials for Email (Nodemailer)
+
+3. **Infrastructure Setup (Docker)**
+   This project uses `docker-compose` to run PostgreSQL and Redis locally. Start the infrastructure in the background:
+   ```bash
+   docker-compose up -d
+   ```
+   *(Note: The database runs on port 5433 and Redis on 6379 as configured in `docker-compose.yml`)*
+
+4. **Database Migration**
+   Once the database container is running, execute Prisma migrations to set up your schema:
+   ```bash
+   npx prisma generate
+   npx prisma migrate dev
+   # Or push directly to the DB schema
+   npx prisma db push
+   ```
+
+---
+
+## 🚀 Running the Application
+
+You can run the application in various modes depending on your environment.
+
+**Development Mode:**
 ```bash
-$ npm install
+npm run start:dev
 ```
 
-## Compile and run the project
-
+**Production Mode:**
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm run build
+npm run start:prod
 ```
 
-## Run tests
+Once started, the application exposes REST endpoints for webhooks (e.g., Stripe) and internal routing (e.g., `/analytics/revenue`).
 
+---
+
+## ⚙️ Verifying Background Jobs
+
+The application leverages **BullMQ** backed by **Redis** to handle asynchronous tasks such as sending subscription renewal reminder emails.
+
+1. **Start the Application**: Ensure the NestJS application is running (`npm run start:dev`).
+2. **Check the Logs**: Upon startup, you will see output confirming that the job processors and cron services have started:
+   ```
+   [ReminderProcessor] Renewal reminders worker started
+   [ReminderCronService] Subscription renewal reminder cron started
+   ```
+3. **Execution**: The Cron service regularly checks for subscriptions expiring within a certain timeframe (e.g., 3 days). If it finds matches, it enqueues a job, and the worker processes it (e.g., sending an email via Nodemailer). 
+   ```
+   [ReminderCronService] Found 1 subscription(s) expiring within the next 3 days
+   [ReminderCronService] Enqueued 1 renewal reminder job(s)
+   [ReminderProcessor] Renewal reminder email sent for subscription <id>
+   ```
+
+---
+
+## 🤖 Using the MCP Server with an AI Client
+
+The project includes a custom **MCP Server** in the `/mcp-server` directory. This server exposes specific backend capabilities (such as fetching active subscribers, revenue, and platform summaries) directly to AI assistants like Antigravity or Claude Desktop.
+
+### 1. Build the MCP Server
+First, ensure the MCP server is built and transpiled to JavaScript.
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cd mcp-server
+npm run build
 ```
 
-## Deployment
+### 2. Configure the AI Client
+To connect the MCP server to your AI client, you must configure the client to run the generated Node.js script.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+**For Antigravity:**
+Open or create `~/.gemini/antigravity/mcp_config.json` and add the following configuration, ensuring you use the absolute path to the compiled `index.js` file:
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```json
+{
+  "mcpServers": {
+    "my-custom-server": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/your/project/bitcot-backend-task/mcp-server/dist/index.js"
+      ]
+    }
+  }
+}
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 3. Usage
+Restart your AI client or begin a new conversation. The AI will automatically spawn the custom MCP server as a background process via `stdio`. You can now ask the AI questions like:
+- *"What is the total revenue?"*
+- *"How many active subscribers are there?"*
+- *"Give me a platform summary."*
 
-## Resources
+The AI will use the MCP server tools to interact with your local environment securely and answer the queries!
 
-Check out a few resources that may come in handy when working with NestJS:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
 
-## Support
+##Stripe port forward
+stripe listen --forward-to localhost:3000/stripe/webhook
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+docker compose up -d
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+<!-- 
+UPDATE "Subscription"
+SET
+  "expiryDate" = NOW(),
+  "currentPeriodEnd" = NOW(),
+  "updatedAt" = NOW()
+WHERE "userId" = (
+  SELECT "id"
+  FROM "User"
+  WHERE "email" = 'test123@example.com'
+); -->
