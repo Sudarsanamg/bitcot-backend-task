@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer, { Transporter } from 'nodemailer';
 import { basename } from 'path';
+import {
+  subscriptionSuccessTemplate,
+  type SubscriptionSuccessTemplateData,
+} from './templates/subscription-success.template';
 
 export interface SendInvoiceEmailInput {
   customerName: string;
@@ -43,15 +47,14 @@ export class EmailService {
   async sendSubscriptionConfirmationEmail(
     input: SendInvoiceEmailInput,
   ): Promise<void> {
-    const subject = 'Subscription Activated Successfully';
-    const text = this.buildTextBody(input);
-    const html = this.buildHtmlBody(input);
+    const templateData = this.buildTemplateData(input);
+    const html = subscriptionSuccessTemplate(templateData);
 
     await this.transporter.sendMail({
       from: this.mailFrom,
       to: input.customerEmail,
-      subject,
-      text,
+      subject: 'Subscription Activated Successfully',
+      text: this.buildPlainTextBody(input),
       html,
       attachments: [
         {
@@ -62,39 +65,33 @@ export class EmailService {
     });
   }
 
-  private buildTextBody(input: SendInvoiceEmailInput) {
+  private buildTemplateData(
+    input: SendInvoiceEmailInput,
+  ): SubscriptionSuccessTemplateData {
+    return {
+      customerName: input.customerName,
+      subscriptionPlan: input.subscriptionPlan,
+      billingInterval: input.billingInterval,
+      paymentStatus: input.paymentStatus,
+      subscriptionExpiryDate: input.subscriptionExpiryDate,
+      invoiceNumber: input.invoiceNumber,
+      paymentProvider: input.paymentProvider,
+    };
+  }
+
+  private buildPlainTextBody(input: SendInvoiceEmailInput) {
     return [
       `Hello ${input.customerName},`,
       '',
-      'Your subscription payment was processed successfully.',
-      '',
-      `Subscription Plan: ${input.subscriptionPlan}`,
-      `Billing Interval: ${input.billingInterval}`,
-      `Payment Status: ${input.paymentStatus}`,
-      `Payment Provider: ${input.paymentProvider}`,
-      `Start Date: ${this.formatDisplayDate(input.subscriptionStartDate)}`,
-      `Expiry Date: ${this.formatDisplayDate(input.subscriptionExpiryDate)}`,
-      `Payment Date: ${this.formatDisplayDate(input.paymentDate)}`,
+      'Your subscription has been activated successfully.',
+      `Plan: ${input.subscriptionPlan}`,
+      `Billing interval: ${input.billingInterval}`,
+      `Payment status: ${input.paymentStatus}`,
+      `Subscription expires: ${this.formatDisplayDate(input.subscriptionExpiryDate)}`,
+      `Invoice attached: ${input.invoiceNumber}`,
       '',
       'Thank you for your subscription.',
     ].join('\n');
-  }
-
-  private buildHtmlBody(input: SendInvoiceEmailInput) {
-    return `
-      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
-        <p>Hello ${input.customerName},</p>
-        <p>Your subscription payment was processed successfully.</p>
-        <p><strong>Subscription Plan:</strong> ${input.subscriptionPlan}<br />
-        <strong>Billing Interval:</strong> ${input.billingInterval}<br />
-        <strong>Payment Status:</strong> ${input.paymentStatus}<br />
-        <strong>Payment Provider:</strong> ${input.paymentProvider}<br />
-        <strong>Start Date:</strong> ${this.formatDisplayDate(input.subscriptionStartDate)}<br />
-        <strong>Expiry Date:</strong> ${this.formatDisplayDate(input.subscriptionExpiryDate)}<br />
-        <strong>Payment Date:</strong> ${this.formatDisplayDate(input.paymentDate)}</p>
-        <p>Thank you for your subscription.</p>
-      </div>
-    `;
   }
 
   private formatDisplayDate(date: Date) {
