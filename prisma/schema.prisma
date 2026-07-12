@@ -44,12 +44,14 @@ model Subscription {
   providerSubscriptionId  String          @unique
   providerCustomerId      String
   status                  SubscriptionStatus
+  amount                  Int             @default(0)
   plan                    String
   billingInterval         BillingInterval
   providerPriceId         String
   providerProductId       String
   startDate               DateTime
   expiryDate              DateTime
+  expiresAt               DateTime?
   currentPeriodStart      DateTime
   currentPeriodEnd        DateTime
   latestCheckoutSessionId String          @unique

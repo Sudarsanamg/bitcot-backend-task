@@ -34,6 +34,7 @@
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "puppeteer": "^25.3.0",
+    "redis": "^5.12.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "stripe": "^22.3.0"

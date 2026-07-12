@@ -17,6 +17,8 @@ import { StripeService } from './stripe.service';
 type StoredSubscription = {
   startDate: Date;
   expiryDate: Date;
+  expiresAt: Date;
+  amount: number;
 };
 
 type PostPaymentContext = {
@@ -275,12 +277,14 @@ export class StripeWebhookService {
       providerSubscriptionId: extracted.subscriptionId,
       providerCustomerId: extracted.customerId,
       status: this.mapSubscriptionStatus(subscription.status),
+      amount: extracted.amountPaid,
       plan: typeof price.product === 'string' ? price.product : price.product.name ?? price.id,
       billingInterval,
       providerPriceId: price.id,
       providerProductId: productId,
       startDate,
       expiryDate: nextExpiryDate,
+      expiresAt: nextExpiryDate,
       currentPeriodStart: renewalAnchorDate,
       currentPeriodEnd: nextExpiryDate,
       latestCheckoutSessionId: extracted.checkoutSessionId,
