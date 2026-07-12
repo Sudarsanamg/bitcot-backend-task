@@ -1,11 +1,13 @@
 -- CreateEnum
 CREATE TYPE "BillingInterval" AS ENUM ('MONTHLY', 'YEARLY');
 
+-- CreateEnum
+CREATE TYPE "PaymentProvider" AS ENUM ('STRIPE');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
     "email" TEXT NOT NULL,
-    "stripeCustomerId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -16,13 +18,14 @@ CREATE TABLE "User" (
 CREATE TABLE "Subscription" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "stripeSubscriptionId" TEXT NOT NULL,
-    "stripeCustomerId" TEXT NOT NULL,
+    "paymentProvider" "PaymentProvider" NOT NULL,
+    "providerSubscriptionId" TEXT NOT NULL,
+    "providerCustomerId" TEXT NOT NULL,
     "status" TEXT NOT NULL,
     "plan" TEXT NOT NULL,
     "billingInterval" "BillingInterval" NOT NULL,
-    "priceId" TEXT NOT NULL,
-    "productId" TEXT NOT NULL,
+    "providerPriceId" TEXT NOT NULL,
+    "providerProductId" TEXT NOT NULL,
     "startDate" TIMESTAMP(3) NOT NULL,
     "expiryDate" TIMESTAMP(3) NOT NULL,
     "currentPeriodStart" TIMESTAMP(3) NOT NULL,
@@ -39,10 +42,11 @@ CREATE TABLE "Subscription" (
 CREATE TABLE "Order" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
-    "checkoutSessionId" TEXT NOT NULL,
-    "paymentIntentId" TEXT,
-    "stripeCustomerId" TEXT NOT NULL,
-    "stripeSubscriptionId" TEXT,
+    "paymentProvider" "PaymentProvider" NOT NULL,
+    "providerCheckoutSessionId" TEXT NOT NULL,
+    "providerPaymentIntentId" TEXT,
+    "providerCustomerId" TEXT NOT NULL,
+    "providerSubscriptionId" TEXT,
     "amount" INTEGER NOT NULL,
     "currency" TEXT NOT NULL,
     "paymentStatus" TEXT NOT NULL,
@@ -55,11 +59,12 @@ CREATE TABLE "Order" (
 -- CreateTable
 CREATE TABLE "WebhookEvent" (
     "id" TEXT NOT NULL,
+    "paymentProvider" "PaymentProvider" NOT NULL,
     "eventId" TEXT NOT NULL,
     "eventType" TEXT NOT NULL,
-    "checkoutSessionId" TEXT,
-    "stripeCustomerId" TEXT,
-    "stripeSubscriptionId" TEXT,
+    "providerCheckoutSessionId" TEXT,
+    "providerCustomerId" TEXT,
+    "providerSubscriptionId" TEXT,
     "payload" JSONB NOT NULL,
     "processedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -70,25 +75,22 @@ CREATE TABLE "WebhookEvent" (
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_stripeCustomerId_key" ON "User"("stripeCustomerId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Subscription_userId_key" ON "Subscription"("userId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Subscription_stripeSubscriptionId_key" ON "Subscription"("stripeSubscriptionId");
+CREATE UNIQUE INDEX "Subscription_providerSubscriptionId_key" ON "Subscription"("providerSubscriptionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Subscription_latestCheckoutSessionId_key" ON "Subscription"("latestCheckoutSessionId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Order_checkoutSessionId_key" ON "Order"("checkoutSessionId");
+CREATE UNIQUE INDEX "Order_providerCheckoutSessionId_key" ON "Order"("providerCheckoutSessionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "WebhookEvent_eventId_key" ON "WebhookEvent"("eventId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "WebhookEvent_checkoutSessionId_key" ON "WebhookEvent"("checkoutSessionId");
+CREATE UNIQUE INDEX "WebhookEvent_providerCheckoutSessionId_key" ON "WebhookEvent"("providerCheckoutSessionId");
 
 -- AddForeignKey
 ALTER TABLE "Subscription" ADD CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

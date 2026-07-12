@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
-import { BillingInterval, Prisma } from '@prisma/client';
+import { BillingInterval, PaymentProvider, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StripeService } from './stripe.service';
 
@@ -36,30 +36,28 @@ export class StripeWebhookService {
     const session = event.data.object as CheckoutSessionCompleted;
     const extracted = this.extractCompletedCheckoutSession(session);
     const subscription = await this.stripeService.retrieveSubscription(
-      extracted.stripeSubscriptionId,
+      extracted.subscriptionId,
     );
 
     await this.prisma.$transaction(async (tx) => {
       // The webhook event is written first so repeated deliveries fail fast on the unique event id.
       await tx.webhookEvent.create({
         data: {
+          paymentProvider: PaymentProvider.STRIPE,
           eventId: event.id,
           eventType: event.type,
-          checkoutSessionId: extracted.checkoutSessionId,
-          stripeCustomerId: extracted.stripeCustomerId,
-          stripeSubscriptionId: extracted.stripeSubscriptionId,
+          providerCheckoutSessionId: extracted.checkoutSessionId,
+          providerCustomerId: extracted.customerId,
+          providerSubscriptionId: extracted.subscriptionId,
           payload: event as unknown as Prisma.InputJsonValue,
         },
       });
 
       const user = await tx.user.upsert({
         where: { email: extracted.customerEmail },
-        update: {
-          stripeCustomerId: extracted.stripeCustomerId,
-        },
+        update: {},
         create: {
           email: extracted.customerEmail,
-          stripeCustomerId: extracted.stripeCustomerId,
         },
       });
 
@@ -78,11 +76,12 @@ export class StripeWebhookService {
       });
 
       await tx.order.upsert({
-        where: { checkoutSessionId: extracted.checkoutSessionId },
+        where: { providerCheckoutSessionId: extracted.checkoutSessionId },
         update: {
-          paymentIntentId: extracted.paymentIntentId,
-          stripeCustomerId: extracted.stripeCustomerId,
-          stripeSubscriptionId: extracted.stripeSubscriptionId,
+          paymentProvider: PaymentProvider.STRIPE,
+          providerPaymentIntentId: extracted.paymentIntentId,
+          providerCustomerId: extracted.customerId,
+          providerSubscriptionId: extracted.subscriptionId,
           amount: extracted.amountPaid,
           currency: extracted.currency,
           paymentStatus: extracted.paymentStatus,
@@ -90,10 +89,11 @@ export class StripeWebhookService {
         },
         create: {
           userId: user.id,
-          checkoutSessionId: extracted.checkoutSessionId,
-          paymentIntentId: extracted.paymentIntentId,
-          stripeCustomerId: extracted.stripeCustomerId,
-          stripeSubscriptionId: extracted.stripeSubscriptionId,
+          paymentProvider: PaymentProvider.STRIPE,
+          providerCheckoutSessionId: extracted.checkoutSessionId,
+          providerPaymentIntentId: extracted.paymentIntentId,
+          providerCustomerId: extracted.customerId,
+          providerSubscriptionId: extracted.subscriptionId,
           amount: extracted.amountPaid,
           currency: extracted.currency,
           paymentStatus: extracted.paymentStatus,
@@ -138,8 +138,8 @@ export class StripeWebhookService {
 
     return {
       customerEmail,
-      stripeCustomerId,
-      stripeSubscriptionId,
+      customerId: stripeCustomerId,
+      subscriptionId: stripeSubscriptionId,
       checkoutSessionId,
       paymentIntentId,
       paymentStatus: session.payment_status,
@@ -165,13 +165,14 @@ export class StripeWebhookService {
     const productId = typeof price.product === 'string' ? price.product : price.product.id;
 
     return {
-      stripeSubscriptionId: extracted.stripeSubscriptionId,
-      stripeCustomerId: extracted.stripeCustomerId,
+      paymentProvider: PaymentProvider.STRIPE,
+      providerSubscriptionId: extracted.subscriptionId,
+      providerCustomerId: extracted.customerId,
       status: subscription.status,
       plan: typeof price.product === 'string' ? price.product : price.product.name ?? price.id,
       billingInterval,
-      priceId: price.id,
-      productId,
+      providerPriceId: price.id,
+      providerProductId: productId,
       startDate: this.toStripeDate(subscription.start_date, 'startDate'),
       expiryDate: this.toStripeDate(
         this.getSubscriptionTimestamp(subscription, subscriptionItem, 'current_period_end'),
