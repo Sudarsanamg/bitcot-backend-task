@@ -12,7 +12,7 @@ export class ReminderCronService {
     private readonly reminderQueueService: ReminderQueueService,
   ) {}
 
-  @Cron('*/5 * * * *')
+  @Cron('0 0 * * *') 
   async deactivateExpiredSubscriptions() {
     this.logger.log('Expired subscription deactivation cron started');
     try {
@@ -28,7 +28,7 @@ export class ReminderCronService {
     }
   }
 
-  @Cron('*/5 * * * *')
+  @Cron('0 0 * * *')
   async enqueueRenewalReminders() {
     this.logger.log('Subscription renewal reminder cron started');
 
