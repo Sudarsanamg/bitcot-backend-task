@@ -313,3 +313,15 @@ The cron job will detect the subscription and enqueue the reminder email.
 - Nodemailer
 - Mailtrap
 - Model Context Protocol (MCP)
+```
+
+
+Screenshots :
+MCP Server
+
+
+
+
+<img width="458" height="763" alt="Screenshot from 2026-07-12 22-09-36" src="https://github.com/user-attachments/assets/396301a8-6bf8-4608-85e9-f644401cb15f" />
+
+
